@@ -1,0 +1,763 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Estudo 02 · Café racer, peça por peça</title>
+
+<!--
+  Estudo de modelagem hard-surface. A moto vem de blender/moto.py (npm run moto).
+
+  v2: visual das referências.
+    - rikoutaku.work → fundo escuro, tela de carregamento com círculos e % grande,
+                       rótulos miúdos e espaçados, cruzes de mira.
+    - vastspace.com  → título enorme sem serifa, palavra gigante vazada atrás do objeto,
+                       marcas "+" nos cantos.
+    - tabletales     → seção presa na tela enquanto o scroll comanda a animação.
+  O acabamento (cortina, títulos com máscara, cursor, granulado) vem do Lievo: RECEITA §5b.
+
+  A pilha de camadas, de trás para a frente:
+    grade de linhas → palavra vazada → <canvas> 3D → <main> (texto) → marcações → topo / cursor / granulado
+  A abertura é um vídeo em loop que cobre o 3D; ele é filmado em filme.html (RECEITA §5c).
+-->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --fundo: #0b0c0d;
+    --chapa: #121416;
+    --texto: #eceae5;
+    --suave: #8b8e93;
+    --linha: rgba(236, 234, 229, .13);
+    --ambar: #f0902a;         /* a cor das lentes dos piscas */
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --dados: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+    --borda: max(18px, 4vw);
+    --curva: cubic-bezier(.77, 0, .175, 1);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { background: var(--fundo); }
+  html.carregando { overflow: hidden; }
+  body { background: var(--fundo); color: var(--texto); font-family: var(--display); overflow-x: hidden; -webkit-font-smoothing: antialiased; }
+  a { color: inherit; text-decoration: none; }
+  .mono { font-family: var(--dados); font-size: .66rem; letter-spacing: .22em; text-transform: uppercase; font-variant-numeric: tabular-nums; }
+
+  /* ---------- fundo: grade de linhas finas + luz de estúdio ---------- */
+  .grade { position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background:
+      radial-gradient(ellipse 70% 62% at 58% 56%, #26292d 0%, #111315 58%, #08090a 100%),
+      var(--fundo); }
+  .grade::after { content: ''; position: absolute; inset: 0; opacity: .06;
+    background-image: linear-gradient(90deg, var(--texto) 1px, transparent 1px); background-size: 25vw 100%; }
+
+  /* ---------- palavra gigante vazada, atrás da moto (Vast) ---------- */
+  .palavra { position: fixed; z-index: 0; left: 0; top: 50%; transform: translateY(-58%); pointer-events: none; white-space: nowrap;
+    font-size: clamp(7rem, 30vw, 34rem); font-weight: 800; font-stretch: 70%; line-height: 1; letter-spacing: -.02em; text-transform: uppercase;
+    color: transparent; -webkit-text-stroke: 1px rgba(236, 234, 229, .22); }
+
+  #cena { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 1; display: block; }
+  main { position: relative; z-index: 2; }
+
+  /* ---------- títulos com máscara ---------- */
+  .linha { display: block; overflow: hidden; padding-bottom: .1em; margin-bottom: -.1em; }
+  .pal { display: inline-block; will-change: transform; }
+
+  /* ---------- tela de carregamento (rikoutaku): círculos, mira e % grande ---------- */
+  #carregando { position: fixed; inset: 0; z-index: 50; background: #0b0c0d; color: var(--texto); display: grid; place-items: center; }
+  #carregando svg { width: min(52vw, 52vh); height: min(52vw, 52vh); overflow: visible; }
+  #carregando circle { fill: none; stroke: rgba(236, 234, 229, .28); stroke-width: 1; }
+  #carregando .arco { stroke: var(--texto); stroke-width: 1.4; stroke-dasharray: 100; stroke-dashoffset: 100; transform: rotate(-90deg); transform-origin: 100px 100px; }
+  #carregando .ponto { fill: var(--texto); stroke: none; }
+  #carregando .mira { stroke: rgba(236, 234, 229, .5); stroke-width: 1; }
+  #carregando .orbita { animation: orbita 3.2s linear infinite; transform-origin: 100px 100px; }
+  @keyframes orbita { to { transform: rotate(360deg); } }
+  #carregando .canto { position: absolute; color: var(--suave); }
+  #carregando .c1 { left: var(--borda); top: 22px; } #carregando .c2 { left: var(--borda); bottom: 26px; }
+  #carregando .pct { position: absolute; right: var(--borda); bottom: 18px; text-align: right; }
+  #carregando .pct small { display: block; color: var(--suave); margin-bottom: 4px; }
+  #carregando .pct b { font-family: var(--display); font-weight: 300; font-stretch: 80%; font-size: clamp(3rem, 9vw, 6rem); line-height: 1; letter-spacing: -.03em; }
+  #carregando .pct b i { font-style: normal; font-size: .3em; color: var(--suave); margin-left: .2em; }
+
+  /* ---------- granulado, vinheta, marcas "+" nos cantos ---------- */
+  .grao { position: fixed; inset: 0; z-index: 40; pointer-events: none; opacity: .09; mix-blend-mode: overlay;
+    background-image: var(--ruido); animation: grao .9s steps(6) infinite; }
+  @keyframes grao { 0% { background-position: 0 0; } 20% { background-position: -37px 23px; } 40% { background-position: 51px -61px; }
+    60% { background-position: -19px 77px; } 80% { background-position: 66px 14px; } 100% { background-position: 0 0; } }
+  .vinheta { position: fixed; inset: 0; z-index: 3; pointer-events: none; background: radial-gradient(ellipse 90% 80% at 50% 50%, transparent 55%, rgba(0, 0, 0, .5) 100%); }
+  .mais { position: fixed; z-index: 9; width: 11px; height: 11px; pointer-events: none; opacity: .55;
+    background: linear-gradient(var(--texto), var(--texto)) center / 100% 1px no-repeat, linear-gradient(var(--texto), var(--texto)) center / 1px 100% no-repeat; }
+  .mais.a { left: var(--borda); top: 64px; } .mais.b { right: var(--borda); top: 64px; }
+  .mais.c { left: var(--borda); bottom: 58px; } .mais.d { right: var(--borda); bottom: 58px; }
+
+  /* ---------- cursor próprio + nome da peça ---------- */
+  .cursor, .anel, #dica { position: fixed; left: 0; top: 0; z-index: 45; pointer-events: none; opacity: 0; }
+  .cursor { width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: var(--ambar); }
+  .anel { width: 36px; height: 36px; margin: -18px 0 0 -18px; border-radius: 50%; border: 1px solid rgba(236, 234, 229, .6); transition: width .3s, height .3s, margin .3s, border-color .3s; }
+  .anel.sobre { width: 62px; height: 62px; margin: -31px 0 0 -31px; border-color: var(--ambar); }
+  #dica { margin: 26px 0 0 26px; color: var(--ambar); white-space: nowrap; }
+  @media (pointer: fine) { .com-cursor, .com-cursor a { cursor: none; } }
+
+  /* ---------- topo ---------- */
+  .topo { position: fixed; z-index: 10; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+    padding: calc(22px + env(safe-area-inset-top, 0px)) var(--borda) 22px; color: var(--suave); }
+  .topo b { color: var(--texto); font-weight: 400; }
+  .topo .marca::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--ambar); margin-right: 12px; vertical-align: 1px; }
+  .menu { display: flex; gap: 2rem; list-style: none; }
+  .menu a { position: relative; pointer-events: auto; }
+  .menu a::after { content: ''; position: absolute; left: 0; right: 0; bottom: -5px; height: 1px; background: currentColor; transform: scaleX(0); transform-origin: right; transition: transform .45s var(--curva); }
+  .menu a:hover { color: var(--texto); } .menu a:hover::after { transform: scaleX(1); transform-origin: left; }
+
+  /* ---------- abertura ---------- */
+  /* vídeo de clima em loop (filmado em filme.html), com o título por cima; o 3D começa logo abaixo */
+  .abertura { position: relative; height: 100vh; min-height: 560px; padding: 0 var(--borda) 84px; display: flex; flex-direction: column; justify-content: flex-end;
+    pointer-events: none; overflow: hidden; background: var(--fundo); }
+  .abertura video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .abertura::after { content: ''; position: absolute; inset: 0; background: linear-gradient(rgba(11, 12, 13, .35), rgba(11, 12, 13, 0) 30%, rgba(11, 12, 13, .2) 55%, rgba(11, 12, 13, .92)); }
+  .abertura > *:not(video) { position: relative; z-index: 2; }
+  .abertura .role { position: absolute; right: var(--borda); bottom: 84px; color: var(--suave); margin: 0; }
+  @media (max-width: 760px) { .abertura .role { display: none; } }
+  .abertura .mono { color: var(--ambar); margin-bottom: 1.1rem; }
+  .abertura h1 { font-size: clamp(3rem, 8.6vw, 9rem); line-height: .86; letter-spacing: -.03em; font-weight: 700; font-stretch: 72%; text-transform: uppercase; white-space: nowrap; }
+  .abertura p { margin-top: 1.5rem; max-width: 40ch; color: var(--suave); line-height: 1.55; font-weight: 400; }
+
+  /* ---------- palco ---------- */
+  #palco { height: 700vh; pointer-events: none; }
+  .fixo { position: sticky; top: 0; height: 100vh; padding: 0 var(--borda) 84px; display: flex; align-items: flex-end; }
+  .passos { position: relative; width: min(46ch, 100%); height: 13rem; }
+  .passo { position: absolute; left: 0; bottom: 0; width: max-content; max-width: calc(100vw - 2 * var(--borda)); }
+  .passo .mono { display: block; color: var(--ambar); margin-bottom: .9rem; opacity: 0; }
+  .passo h2 { font-size: clamp(1.9rem, 4.4vw, 4rem); font-weight: 650; font-stretch: 76%; line-height: .98; letter-spacing: -.02em; text-transform: uppercase; white-space: nowrap; }
+  .passo p { margin-top: .9rem; color: var(--suave); line-height: 1.55; max-width: 40ch; font-size: .95rem; opacity: 0; }
+
+  /* ---------- rodapé fixo do palco: capítulo, barra e leitura dos números ---------- */
+  #hud { position: fixed; z-index: 9; left: var(--borda); right: var(--borda); bottom: 22px; display: flex; align-items: center; gap: 18px; color: var(--suave); transition: opacity .4s; }
+  #hud.fora { opacity: 0; }
+  #hud .barra { flex: 1; height: 1px; background: var(--linha); }
+  #hud .barra i { display: block; height: 100%; width: 0; background: var(--ambar); }
+  #hud b { color: var(--texto); font-weight: 400; }
+
+  /* ---------- marcações: etiquetas presas às peças (desenho técnico) ---------- */
+  #marcas { position: fixed; inset: 0; z-index: 4; pointer-events: none; overflow: hidden; }
+  .marca { position: absolute; left: 0; top: 0; opacity: 0; will-change: transform, opacity; }
+  .marca i { position: absolute; left: -3px; top: -3px; width: 7px; height: 7px; border-radius: 50%; background: var(--ambar); box-shadow: 0 0 0 4px rgba(240, 144, 42, .18); }
+  .marca svg { position: absolute; left: 0; top: 0; overflow: visible; }
+  .marca line { stroke: rgba(236, 234, 229, .55); stroke-width: 1; }
+  .marca span { position: absolute; white-space: nowrap; color: var(--texto); line-height: 1.5; background: rgba(11, 12, 13, .72); padding: 4px 8px; border: 1px solid var(--linha); }
+  .marca span small { display: block; color: var(--suave); font-size: 1em; }
+
+  /* ---------- "Na estrada": take realista gerado por IA. Só aparece se video/estrada.mp4 existir ---------- */
+  .estrada { position: relative; height: 100vh; min-height: 560px; overflow: hidden; background: var(--fundo); border-top: 1px solid var(--linha); }
+  .estrada[hidden] { display: none; }
+  .estrada video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .estrada::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(rgba(11, 12, 13, .3), rgba(11, 12, 13, 0) 35%, rgba(11, 12, 13, .85)); }
+  .estrada-texto { position: absolute; z-index: 2; left: var(--borda); right: var(--borda); bottom: 84px; }
+  .estrada-texto .mono { display: block; color: var(--ambar); margin-bottom: 1.2rem; }
+  .estrada h3 { font-size: clamp(2.4rem, 7vw, 7rem); font-weight: 700; font-stretch: 72%; line-height: .9; letter-spacing: -.03em; text-transform: uppercase; white-space: nowrap; }
+  .estrada p { margin-top: 1.3rem; max-width: 44ch; color: rgba(236, 234, 229, .8); line-height: 1.55; }
+  .estrada .ia { position: absolute; z-index: 2; right: var(--borda); bottom: 28px; color: rgba(236, 234, 229, .6); }
+
+  /* ---------- seções depois do palco ---------- */
+  .secao { position: relative; background: var(--fundo); padding: 16vh var(--borda); border-top: 1px solid var(--linha); }
+  .secao .mono.olho { display: block; color: var(--ambar); margin-bottom: 1.4rem; }
+  .secao h3 { font-size: clamp(2.4rem, 7vw, 7rem); font-weight: 700; font-stretch: 72%; line-height: .9; letter-spacing: -.03em; text-transform: uppercase; white-space: nowrap; }
+  .secao .intro { margin-top: 1.6rem; max-width: 52ch; color: var(--suave); line-height: 1.6; }
+
+  .numeros { margin-top: 9vh; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--linha); }
+  .numeros div { padding: 2.2rem 1.5rem 2.6rem 0; border-bottom: 1px solid var(--linha); }
+  .numeros b { display: block; font-weight: 300; font-stretch: 78%; font-size: clamp(2.6rem, 6.4vw, 6rem); line-height: 1; letter-spacing: -.03em; }
+  .numeros b small { font-size: .32em; color: var(--suave); margin-left: .25em; letter-spacing: 0; }
+  .numeros div > span { display: block; margin-top: .9rem; color: var(--suave); }
+  @media (max-width: 760px) { .numeros { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+  .lista { margin-top: 8vh; border-top: 1px solid var(--linha); list-style: none; }
+  .lista li { display: grid; grid-template-columns: 4rem minmax(0, 1.1fr) minmax(0, .8fr) minmax(0, 1.4fr); gap: 1.5rem; align-items: baseline;
+    padding: 2rem 0; border-bottom: 1px solid var(--linha); position: relative; transition: padding .5s var(--curva), color .3s; }
+  .lista li::before { content: ''; position: absolute; left: 0; bottom: -1px; width: 100%; height: 1px; background: var(--ambar); transform: scaleX(0); transform-origin: left; transition: transform .6s var(--curva); }
+  .lista li:hover { padding-left: 1.2rem; } .lista li:hover::before { transform: scaleX(1); }
+  .lista .n { color: var(--ambar); }
+  .lista h4 { font-size: clamp(1.6rem, 3.4vw, 3rem); font-weight: 600; font-stretch: 78%; letter-spacing: -.02em; text-transform: uppercase; line-height: 1; }
+  .lista .irmao { color: var(--suave); }
+  .lista p { color: var(--suave); line-height: 1.55; font-size: .95rem; }
+  @media (max-width: 860px) { .lista li { grid-template-columns: 2.4rem minmax(0, 1fr); } .lista .irmao, .lista p { grid-column: 2; } }
+
+  footer { position: relative; background: var(--fundo); padding: 12vh var(--borda) 5vh; border-top: 1px solid var(--linha); overflow: hidden; }
+  footer .grande { font-size: clamp(4rem, 24vw, 26rem); font-weight: 800; font-stretch: 66%; line-height: .8; letter-spacing: -.03em; text-transform: uppercase; white-space: nowrap;
+    color: transparent; -webkit-text-stroke: 1px rgba(236, 234, 229, .35); }
+  footer .pe { margin-top: 3.5rem; padding-top: 1.4rem; border-top: 1px solid var(--linha); display: flex; justify-content: space-between; gap: 2rem; flex-wrap: wrap; color: var(--suave); line-height: 1.6; font-size: .9rem; }
+  footer .pe p { max-width: 60ch; } footer strong { color: var(--texto); font-weight: 500; }
+
+  @media (max-width: 760px) {
+    .menu, .mais, #hud .leitura { display: none; }
+    .marca span small { display: none; }
+    .passos { height: 14rem; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .grao, #carregando .orbita { animation: none; }
+    .passo .mono, .passo p { opacity: 1; }
+  }
+</style>
+</head>
+<body>
+
+<div id="carregando" aria-live="polite">
+  <span class="canto c1 mono">Peça por peça</span>
+  <svg viewBox="0 0 200 200" aria-hidden="true">
+    <circle cx="100" cy="100" r="62"></circle>
+    <circle cx="100" cy="100" r="96"></circle>
+    <circle class="arco" cx="100" cy="100" r="96" pathLength="100" id="arco"></circle>
+    <line class="mira" x1="94" y1="94" x2="106" y2="106"></line><line class="mira" x1="106" y1="94" x2="94" y2="106"></line>
+    <g class="orbita"><circle class="ponto" cx="100" cy="4" r="3.2"></circle></g>
+  </svg>
+  <span class="canto c2 mono">Estudo 02 — 2026</span>
+  <span class="pct"><small class="mono">Carregando</small><b><span id="pct">000</span><i>%</i></b></span>
+</div>
+
+<div class="grade" aria-hidden="true"></div>
+<p class="palavra" aria-hidden="true">Café racer</p>
+<canvas id="cena" aria-hidden="true"></canvas>
+<div class="vinheta" aria-hidden="true"></div>
+<div id="marcas" aria-hidden="true"></div>
+<div class="grao" aria-hidden="true"></div>
+<i class="mais a"></i><i class="mais b"></i><i class="mais c"></i><i class="mais d"></i>
+<div class="cursor" aria-hidden="true"></div><div class="anel" aria-hidden="true"></div><div id="dica" class="mono" aria-hidden="true"></div>
+
+<header class="topo mono">
+  <span class="marca"><b>Estudo 02</b> · Hard-surface</span>
+  <ul class="menu"><li><a href="#ficha">Ficha</a></li><li><a href="#ferramentas">Ferramentas</a></li></ul>
+</header>
+
+<main>
+  <section class="abertura">
+    <video id="video" autoplay muted loop playsinline preload="auto" poster="./video/abertura-poster.jpg" aria-hidden="true">
+      <source src="./video/abertura.mp4" type="video/mp4">
+    </video>
+    <span class="mono">Blender por script → glTF → Three.js</span>
+    <h1 class="dividir" id="titulo">Café racer,<br>peça por peça.</h1>
+    <p id="sub">Uma moto inteira modelada por script, com quatro ferramentas. Role para girar, desmontar e ver de perto.</p>
+    <span class="mono role">Role ↓</span>
+  </section>
+
+  <section id="palco" aria-label="A moto girando e se desmontando">
+    <div class="fixo">
+      <div class="passos">
+        <div class="passo"><span class="mono">01 · Forma</span><h2 class="dividir"><span id="qtd">63</span> objetos,<br>um nome cada.</h2><p>Tudo em tamanho real: 1,42 m entre os eixos. Passe o mouse para ler o nome de cada peça.</p></div>
+        <div class="passo"><span class="mono">02 · Vista explodida</span><h2 class="dividir">Cada peça se<br>afasta do centro.</h2><p>O quadro fica parado. Rodas, motor, tanque e escapes abrem em volta dele.</p></div>
+        <div class="passo"><span class="mono">03 · Motor</span><h2 class="dividir">Dois cilindros,<br>tudo torneado.</h2><p>Aletas são blocos finos empilhados. Tampas, filtros e megafones saem do torno.</p></div>
+        <div class="passo"><span class="mono">04 · Frente</span><h2 class="dividir">Farol, painel<br>e disco furado.</h2><p>Os furos do disco são um Boolean; as marcas do painel, um bloco girado 25 vezes.</p></div>
+        <div class="passo"><span class="mono">05 · Montagem</span><h2 class="dividir">E tudo volta<br>ao lugar.</h2><p>O scroll só muda três números: giro, explosão e câmera.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="estrada" id="estrada" aria-label="A moto rodando na estrada" hidden>
+    <video id="video-estrada" muted loop playsinline preload="metadata" poster="./video/estrada-poster.jpg" aria-hidden="true"></video>
+    <div class="estrada-texto">
+      <span class="mono">Na estrada</span>
+      <h3 class="dividir revela-titulo">Montada,<br>ela sai rodando.</h3>
+      <p>O mesmo modelo, fora do estúdio. As imagens da moto 3D serviram de referência para a IA filmar o que o render não alcança: asfalto, vento e sol baixo.</p>
+    </div>
+    <span class="mono ia">Vídeo gerado com IA (Google Flow) a partir do nosso modelo</span>
+  </section>
+
+  <section class="secao" id="ficha">
+    <span class="mono olho">Ficha técnica</span>
+    <h3 class="dividir revela-titulo">A moto<br>em números.</h3>
+    <p class="intro revela">Nada aqui foi baixado pronto. Cada peça nasce de uma função no script, com medidas reais, e o arquivo inteiro pesa menos que uma foto.</p>
+    <div class="numeros">
+      <div class="revela"><b><span class="conta" data-v="63">63</span></b><span class="mono">Objetos separados</span></div>
+      <div class="revela"><b><span class="conta" data-v="134">134</span><small>mil</small></b><span class="mono">Triângulos</span></div>
+      <div class="revela"><b><span class="conta" data-v="766">766</span><small>KB</small></b><span class="mono">Arquivo .glb</span></div>
+      <div class="revela"><b><span class="conta" data-v="1.42" data-dec="2">1,42</span><small>m</small></b><span class="mono">Entre-eixos</span></div>
+      <div class="revela"><b><span class="conta" data-v="26">26</span><small>°</small></b><span class="mono">Inclinação do garfo</span></div>
+      <div class="revela"><b><span class="conta" data-v="36">36</span></b><span class="mono">Raios por roda</span></div>
+    </div>
+  </section>
+
+  <section class="secao" id="ferramentas">
+    <span class="mono olho">Método</span>
+    <h3 class="dividir revela-titulo">Quatro<br>ferramentas.</h3>
+    <p class="intro revela">Cada função do script tem um irmão no Blender. Dá para refazer qualquer peça à mão, ou mudar um parâmetro e gerar a moto de novo.</p>
+    <ul class="lista">
+      <li class="revela"><span class="mono n">01</span><h4>Torno</h4><span class="mono irmao">Spin / Screw</span><p>Um perfil gira em volta de um eixo: pneus, aros, cubos, farol, megafones, sanfonas do garfo.</p></li>
+      <li class="revela"><span class="mono n">02</span><h4>Tubo</h4><span class="mono irmao">Curva com Bevel</span><p>Um círculo percorre um caminho: quadro, guidão, curvas do escape, molas, cabos.</p></li>
+      <li class="revela"><span class="mono n">03</span><h4>Casca</h4><span class="mono irmao">Loft</span><p>Seções ovais ligadas por uma pele lisa: tanque, banco, rabeta e cárter.</p></li>
+      <li class="revela"><span class="mono n">04</span><h4>Bloco</h4><span class="mono irmao">Cubo com Bevel</span><p>Caixa de cantos arredondados: aletas, mesas do garfo, pinças, elos da corrente.</p></li>
+    </ul>
+  </section>
+
+  <footer>
+    <p class="grande" aria-hidden="true">Estudo 02</p>
+    <div class="pe">
+      <p><strong>Estudo de portfólio, sem marca.</strong> O modelo, as medidas e a página foram gerados por código, com Blender, Three.js e GSAP. A moto não copia nenhum modelo de fábrica.</p>
+      <p class="mono">Estudos 3D · 2026</p>
+    </div>
+  </footer>
+</main>
+
+<div id="hud" class="mono fora"><span><b id="cap">01</b> / 05</span><span class="barra"><i id="barra"></i></span><span class="leitura">Giro <b id="l-giro">000</b>°</span><span class="leitura">Explosão <b id="l-exp">000</b>%</span></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+<script src="https://unpkg.com/lenis@1.1.13/dist/lenis.min.js"></script>
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const semMovimento = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const comMouse = matchMedia('(pointer: fine)').matches;
+const $ = (s) => document.querySelector(s);
+document.documentElement.classList.add('carregando');
+gsap.registerPlugin(ScrollTrigger);
+
+/* ============================================================
+   0. CONFIGURAÇÃO: o que mexer primeiro
+   ============================================================ */
+const MODELO_URL = './modelos/moto.glb';
+const TAMANHO_NA_TELA = 2.6;     // comprimento da moto em unidades da cena
+const DISTANCIA_EXPLOSAO = 0.85;
+
+// Câmeras marcadas, uma por capítulo (como câmeras na timeline do Blender).
+// el = altura do olhar em graus, raio = distância, alvo = [x, y] para onde olha.
+const CAMERAS = [
+  { el: 11, raio: 6.3, alvo: [0, 0.05] },   // 01 forma
+  { el: 24, raio: 8.8, alvo: [0, 0.10] },   // 02 explodida
+  { el: 6,  raio: 5.0, alvo: [0, 0.02] },   // 03 motor (de lado)
+  { el: 13, raio: 4.9, alvo: [0, 0.28] },   // 04 frente (perto)
+  { el: 10, raio: 6.2, alvo: [0, 0.05] },   // 05 montagem
+];
+// Em que ponto do scroll (0 a 1) cada capítulo começa.
+const CAPITULOS = [0, 0.17, 0.44, 0.63, 0.81];
+
+// Etiquetas presas às peças. cap = capítulo em que aparecem; dx, dy = para onde a etiqueta vai (px).
+const MARCAS = [
+  { peca: 'motor_cilindros', txt: 'Cilindros', sub: '8 aletas · bloco()', cap: 2, dx: -36, dy: -168 },
+  { peca: 'filtros',         txt: 'Filtros de ar', sub: 'torno()', cap: 2, dx: 54, dy: -176 },
+  { peca: 'motor_tampas',    txt: 'Tampa do alternador', sub: 'torno() + 8 parafusos', cap: 2, dx: -50, dy: 128 },
+  { peca: 'corrente',        txt: 'Corrente', sub: 'elos · bloco()', cap: 2, dx: 60, dy: 104 },
+  { peca: 'farol_lente',     txt: 'Farol', sub: 'torno()', cap: 3, dx: -100, dy: -84 },
+  { peca: 'painel_marcas',   txt: 'Velocímetro', sub: '25 marcas', cap: 3, dx: 90, dy: -84 },
+  { peca: 'garfo_sanfonas',  txt: 'Sanfonas', sub: 'perfil em zigue-zague', cap: 3, dx: -150, dy: 26 },
+  { peca: 'roda_d_disco',    txt: 'Disco furado', sub: 'Boolean · 60 furos', cap: 3, dx: 130, dy: 40 },
+];
+
+/* ============================================================
+   1. ACABAMENTO: granulado, títulos divididos, cursor
+   ============================================================ */
+{ // granulado de filme: ruído num canvas pequeno, repetido e "tremendo" (CSS)
+  const c = document.createElement('canvas'); c.width = c.height = 160;
+  const g = c.getContext('2d'), img = g.createImageData(160, 160);
+  for (let i = 0; i < img.data.length; i += 4) { const v = Math.random() * 255; img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255; }
+  g.putImageData(img, 0, 0);
+  document.documentElement.style.setProperty('--ruido', `url(${c.toDataURL()})`);
+}
+
+// Divide um título em linhas (pelos <br>) e palavras. A linha é a máscara; a palavra sobe por trás dela.
+function dividir(el) {
+  el.innerHTML = el.innerHTML.split(/<br\s*\/?>/i).map((l) => {
+    const tmp = document.createElement('div'); tmp.innerHTML = l.trim();
+    const partes = [];
+    tmp.childNodes.forEach((n) => {
+      if (n.nodeType === 3) n.textContent.split(/\s+/).filter(Boolean).forEach((w) => partes.push(`<span class="pal">${w}</span>`));
+      else partes.push(`<span class="pal">${n.outerHTML}</span>`);
+    });
+    return `<span class="linha">${partes.join(' ')}</span>`;
+  }).join('');
+}
+document.querySelectorAll('.dividir').forEach(dividir);
+gsap.set('.pal', { y: 0, yPercent: semMovimento ? 0 : 110 });
+
+let moverDica = () => {};
+if (comMouse && !semMovimento) {
+  document.documentElement.classList.add('com-cursor');
+  const ponto = $('.cursor'), anel = $('.anel'), dica = $('#dica');
+  const px = gsap.quickTo(ponto, 'x', { duration: 0.08 }), py = gsap.quickTo(ponto, 'y', { duration: 0.08 });
+  const ax = gsap.quickTo(anel, 'x', { duration: 0.45, ease: 'power3' }), ay = gsap.quickTo(anel, 'y', { duration: 0.45, ease: 'power3' });
+  const dx = gsap.quickTo(dica, 'x', { duration: 0.3, ease: 'power3' }), dy = gsap.quickTo(dica, 'y', { duration: 0.3, ease: 'power3' });
+  addEventListener('pointermove', (e) => {
+    px(e.clientX); py(e.clientY); ax(e.clientX); ay(e.clientY); dx(e.clientX); dy(e.clientY);
+    gsap.to([ponto, anel, dica], { opacity: 1, duration: 0.3, overwrite: 'auto' });
+    anel.classList.toggle('sobre', !!e.target.closest?.('a, li') || anel.dataset.peca === '1');
+  });
+  moverDica = (nome) => { dica.textContent = nome; anel.dataset.peca = nome ? '1' : ''; anel.classList.toggle('sobre', !!nome); };
+}
+
+/* ============================================================
+   2. A CENA: renderer, luzes de estúdio, chão
+   ============================================================ */
+const renderer = new THREE.WebGLRenderer({ canvas: $('#cena'), antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+// "HDRI" de estúdio gerado em código: é o que aparece refletido no cromo.
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.03).texture;
+
+// Luz principal (quente, com sombra) + contraluz fria que recorta a silhueta no fundo escuro.
+const principal = new THREE.DirectionalLight(0xfff1e0, 2.6);
+principal.position.set(2.5, 6, 3.5);
+principal.castShadow = true;
+principal.shadow.mapSize.set(1024, 1024);
+Object.assign(principal.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4, near: 0.5, far: 20 });
+principal.shadow.bias = -0.0008;
+principal.shadow.radius = 6;
+const contra = new THREE.DirectionalLight(0x9fc4ff, 2.2);
+contra.position.set(-3, 2.5, -4);
+scene.add(principal, contra);
+
+const camera = new THREE.PerspectiveCamera(32, innerWidth / innerHeight, 0.1, 100);
+const pivo = new THREE.Group();          // um "Empty" no centro: gira ele, a moto gira junto
+scene.add(pivo);
+
+// Chão de estúdio: disco escuro que some nas bordas (a transparência vem de um degradê em canvas).
+{
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d'), d = g.createRadialGradient(128, 128, 10, 128, 128, 128);
+  d.addColorStop(0, '#fff'); d.addColorStop(0.55, '#777'); d.addColorStop(1, '#000');
+  g.fillStyle = d; g.fillRect(0, 0, 256, 256);
+  const chao = new THREE.Mesh(new THREE.CircleGeometry(6.5, 72),
+    new THREE.MeshStandardMaterial({ color: 0x1b1d20, roughness: 0.5, metalness: 0.3, transparent: true, alphaMap: new THREE.CanvasTexture(c), depthWrite: false }));
+  chao.rotation.x = -Math.PI / 2;
+  chao.receiveShadow = true;
+  scene.add(chao);
+}
+
+/* ============================================================
+   3. CARREGAR O MODELO (com a % real do download)
+   ============================================================ */
+function mostrarPct(v) {
+  $('#pct').textContent = String(Math.round(v)).padStart(3, '0');
+  $('#arco').style.strokeDashoffset = 100 - v;
+}
+async function carregarModelo() {
+  const resp = await fetch(MODELO_URL);
+  const total = +resp.headers.get('content-length') || 790000;
+  const leitor = resp.body.getReader();
+  const pedacos = []; let lido = 0;
+  for (;;) {
+    const { done, value } = await leitor.read();
+    if (done) break;
+    pedacos.push(value); lido += value.length;
+    mostrarPct(Math.min(99, lido / total * 100));
+  }
+  const bytes = new Uint8Array(lido); let pos = 0;
+  for (const p of pedacos) { bytes.set(p, pos); pos += p.length; }
+  // Na versão publicada o modelo vem como texto (base64), porque o Artifact não serve .glb: volta para binário.
+  const dados = MODELO_URL.endsWith('.txt') ? Uint8Array.from(atob(new TextDecoder().decode(bytes).trim()), (c) => c.charCodeAt(0)) : bytes;
+  const gltf = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).parseAsync(dados.buffer, './');   // Meshopt = compressão da malha
+  mostrarPct(100);
+  return gltf.scene;
+}
+
+let alturaCentro = 0;
+function enquadrar(modelo) {       // centraliza, escala e apoia os pneus no chão
+  const caixa = new THREE.Box3().setFromObject(modelo);
+  const tam = caixa.getSize(new THREE.Vector3());
+  const k = TAMANHO_NA_TELA / Math.max(tam.x, tam.y, tam.z);
+  modelo.position.sub(caixa.getCenter(new THREE.Vector3()));
+  const ajuste = new THREE.Group();
+  ajuste.add(modelo);
+  ajuste.scale.setScalar(k);
+  alturaCentro = tam.y * k / 2;
+  ajuste.position.y = alturaCentro;
+  modelo.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return ajuste;
+}
+
+/* ============================================================
+   4. VISTA EXPLODIDA + RODAS
+   ============================================================
+   posição = original + deslocamento × explosão. O deslocamento é uma reta do centro
+   da moto até o centro da peça. Peças com o mesmo centro (pneu, aro, raios, cubo) andam juntas.
+*/
+const pecas = [];
+function prepararPecas(raiz) {
+  raiz.updateMatrixWorld(true);
+  const caixa = new THREE.Box3().setFromObject(raiz);
+  const centroGeral = caixa.getCenter(new THREE.Vector3());
+  const raio = caixa.getSize(new THREE.Vector3()).length() / 2;
+  raiz.traverse((obj) => {
+    if (!obj.isMesh) return;
+    const c = new THREE.Box3().setFromObject(obj).getCenter(new THREE.Vector3());
+    const dir = c.clone().sub(centroGeral);
+    const dist = dir.length();
+    const mundo = new THREE.Vector3();                       // deslocamento em coordenadas da cena
+    if (dist > 0.001 && obj.name !== 'quadro') {            // o quadro é a "espinha": fica parado
+      dir.y *= 0.8; dir.normalize();
+      mundo.copy(dir).multiplyScalar(DISTANCIA_EXPLOSAO * (0.35 + dist / raio));
+      // O chão fica em y = 0. Se a peça fosse afundar, o deslocamento para baixo é cortado.
+      const baixo = new THREE.Box3().setFromObject(obj).min.y;
+      if (baixo + mundo.y < 0.02) mundo.y = 0.02 - baixo;
+    }
+    const desloc = new THREE.Vector3();
+    obj.geometry.computeBoundingBox();
+    pecas.push({
+      malha: obj, pos: obj.position.clone(), desloc, mundo, c,
+      centro: obj.geometry.boundingBox.getCenter(new THREE.Vector3()),   // para prender etiquetas
+      roda: /^roda_|^coroa$/.test(obj.name), rot: obj.rotation.z,        // a origem destas peças é o eixo
+    });
+    // A compressão guarda uma escala em cada peça: nunca mexer em obj.scale.
+  });
+  // Cada roda é um conjunto: aro, raios, cubo, disco (e a coroa, atrás) seguem o pneu.
+  for (const p of pecas) {
+    const grupo = p.malha.name === 'coroa' ? 'roda_t' : (p.malha.name.match(/^roda_[dt]/) || [])[0];
+    const pneu = grupo && pecas.find((x) => x.malha.name === grupo + '_pneu');
+    if (pneu) p.mundo.copy(pneu.mundo);
+    // da cena para o espaço do pai da peça (position é relativa ao pai)
+    const pai = p.malha.parent;
+    p.desloc.copy(pai.worldToLocal(p.c.clone().add(p.mundo))).sub(pai.worldToLocal(p.c.clone()));
+  }
+}
+function aplicarPecas() {
+  for (const p of pecas) {
+    p.malha.position.copy(p.pos).addScaledVector(p.desloc, estado.explosao);
+    if (p.roda) p.malha.rotation.z = p.rot - estado.giro * 2.2;         // as rodas só LEEM o giro
+  }
+}
+
+/* ============================================================
+   5. MARCAÇÕES: etiquetas HTML presas a pontos do 3D
+   ============================================================
+   A cada quadro: pega o centro da peça, projeta na tela (3D → pixels) e move a etiqueta para lá.
+*/
+function criarMarcas() {
+  const k = innerWidth < 760 ? 0.6 : 1;                 // no celular as linhas são mais curtas
+  for (const m of MARCAS) {
+    m.p = pecas.find((p) => p.malha.name === m.peca);
+    if (!m.p) continue;
+    m.dx *= k; m.dy *= k;
+    const el = document.createElement('div');
+    el.className = 'marca mono';
+    const dir = m.dx < 0 ? `right: ${-m.dx + 8}px` : `left: ${m.dx + 8}px`;
+    el.innerHTML = `<i></i><svg><line x1="0" y1="0" x2="${m.dx}" y2="${m.dy}"></line></svg>` +
+      `<span style="${dir}; top: ${m.dy - 14}px; text-align: ${m.dx < 0 ? 'right' : 'left'}">${m.txt}<small>${m.sub}</small></span>`;
+    $('#marcas').appendChild(el);
+    m.el = el;
+    m.texto = el.querySelector('span');
+    m.esq = m.texto.offsetLeft; m.larg = m.texto.offsetWidth;   // medidos uma vez, para não sair da tela
+  }
+}
+const v3 = new THREE.Vector3();
+function moverMarcas() {
+  for (const m of MARCAS) {
+    if (!m.el) continue;
+    const op = THREE.MathUtils.clamp(1 - Math.abs(estado.cam - m.cap) * 3, 0, 1) * (1 - Math.min(1, estado.explosao * 4));
+    m.el.style.opacity = op;
+    if (op <= 0) continue;
+    v3.copy(m.p.centro).applyMatrix4(m.p.malha.matrixWorld).project(camera);
+    const x = (v3.x * 0.5 + 0.5) * innerWidth;
+    m.el.style.transform = `translate(${x}px, ${(-v3.y * 0.5 + 0.5) * innerHeight}px)`;
+    // se a etiqueta fosse sair pela lateral (celular), ela desliza de volta para dentro
+    const sobraEsq = 10 - (x + m.esq), sobraDir = (x + m.esq + m.larg) - (innerWidth - 10);
+    m.texto.style.transform = `translateX(${sobraEsq > 0 ? sobraEsq : sobraDir > 0 ? -sobraDir : 0}px)`;
+  }
+}
+
+/* ============================================================
+   6. ESTADO + SCROLL
+   ============================================================
+   O scroll não mexe no 3D. Ele anima estes números; o loop de desenho lê.
+*/
+const estado = { giro: -0.75, explosao: 0, cam: 0, entrada: 1.7 };
+const passos = [...document.querySelectorAll('.passo')];
+let passoAtual = -1;
+
+function mostrarPasso(i) {          // troca de legenda: a antiga sobe e some, a nova sobe de baixo
+  if (i === passoAtual) return;
+  const sai = passos[passoAtual], entra = passos[i];
+  passoAtual = i;
+  $('#cap').textContent = String(i + 1).padStart(2, '0');
+  if (semMovimento) { passos.forEach((p, k) => { p.style.visibility = k === i ? 'visible' : 'hidden'; }); return; }
+  if (sai) {
+    gsap.to(sai.querySelectorAll('.pal'), { yPercent: -110, duration: 0.5, ease: 'power3.in', stagger: 0.02, overwrite: true });
+    gsap.to(sai.querySelectorAll('.mono, p'), { opacity: 0, duration: 0.3, overwrite: true });
+  }
+  gsap.fromTo(entra.querySelectorAll('.pal'), { yPercent: 110 }, { yPercent: 0, duration: 0.9, ease: 'power4.out', stagger: 0.05, delay: sai ? 0.3 : 0, overwrite: true });
+  gsap.to(entra.querySelectorAll('.mono, p'), { opacity: 1, duration: 0.6, delay: sai ? 0.5 : 0.2, overwrite: true });
+}
+
+let lenis = null;
+function ligarScroll() {
+  if (!semMovimento) {
+    lenis = new Lenis();
+    lenis.on('scroll', ScrollTrigger.update);
+    gsap.ticker.add((t) => lenis.raf(t * 1000));
+    gsap.ticker.lagSmoothing(0);
+    document.querySelectorAll('.menu a').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); lenis.scrollTo(a.getAttribute('href')); }));
+  }
+  const suave = 'power2.inOut';
+  gsap.timeline({
+    defaults: { ease: 'none' },
+    scrollTrigger: {
+      trigger: '#palco', start: 'top top', end: 'bottom bottom', scrub: 1,
+      onUpdate: (s) => {
+        $('#barra').style.width = (s.progress * 100) + '%';
+        let i = 0; CAPITULOS.forEach((c, k) => { if (s.progress >= c) i = k; });
+        mostrarPasso(i);
+      },
+    },
+  })
+    // GIRO (dono único): cada capítulo para a moto no ângulo que interessa
+    // (chega rápido, depois gira devagar enquanto o capítulo está na tela)
+    .to(estado, { giro: 0.4, duration: 0.16 }, 0)
+    .to(estado, { giro: 2.1, duration: 0.12 }, 0.16)                 // três quartos de trás: explodida
+    .to(estado, { giro: 2.45, duration: 0.12 }, 0.28)
+    .to(estado, { giro: Math.PI + 0.1, duration: 0.10 }, 0.40)       // lado esquerdo: motor
+    .to(estado, { giro: Math.PI + 0.3, duration: 0.12 }, 0.50)
+    .to(estado, { giro: 4.2, duration: 0.10 }, 0.62)                 // três quartos de frente
+    .to(estado, { giro: 4.4, duration: 0.08 }, 0.72)
+    .to(estado, { giro: Math.PI * 2 - 0.6, duration: 0.20 }, 0.80)
+    // EXPLOSÃO: abre, segura aberta e fecha antes do motor
+    .to(estado, { explosao: 1, duration: 0.12, ease: suave }, 0.16)
+    .to(estado, { explosao: 0, duration: 0.11, ease: suave }, 0.38)
+    // CÂMERA: vai de uma marcada para a seguinte
+    .to(estado, { cam: 1, duration: 0.12, ease: suave }, 0.16)
+    .to(estado, { cam: 2, duration: 0.13, ease: suave }, 0.38)
+    .to(estado, { cam: 3, duration: 0.12, ease: suave }, 0.60)
+    .to(estado, { cam: 4, duration: 0.12, ease: suave }, 0.79)
+    // PALAVRA VAZADA: desliza atrás da moto e some na vista explodida
+    .to('.palavra', { xPercent: -38, duration: 1 }, 0)
+    .to('.palavra', { opacity: 0, duration: 0.06 }, 0.14)
+    .to('.palavra', { opacity: 1, duration: 0.08 }, 0.84);
+
+  // a palavra também acompanha a abertura e some quando as seções de baixo cobrem a cena
+  gsap.fromTo('.palavra', { x: '12vw' }, { x: '-6vw', ease: 'none', scrollTrigger: { trigger: '.abertura', start: 'top top', end: 'bottom top', scrub: 1 } });
+
+  // a barra de capítulos some quando a ficha entra na tela
+  // a barra de capítulos só existe durante o palco (um gatilho só, preso a ele)
+  const hud = (s) => $('#hud').classList.toggle('fora', !s.isActive);
+  ScrollTrigger.create({ trigger: '#palco', start: 'top 60%', end: 'bottom 85%', onToggle: hud, onUpdate: hud });
+
+  // "Na estrada": a seção só entra se o clipe existir (video/estrada.mp4, feito com npm run moto:estrada).
+  // Quem decide é o próprio <video>: se carregou, mostra; se deu erro, a seção continua escondida.
+  {
+    const v = $('#video-estrada'), secao = $('#estrada');
+    v.addEventListener('loadedmetadata', () => {
+      secao.hidden = false;
+      ScrollTrigger.refresh();                                   // a página cresceu: recalcula os gatilhos
+      if (semMovimento) return;
+      const naTela = ScrollTrigger.create({ trigger: secao, start: 'top 90%', end: 'bottom 10%', onToggle: (s) => (s.isActive ? v.play().catch(() => {}) : v.pause()) });
+      // Página escondida (outra aba, painel fechado) segura os vídeos: ao voltar, retoma os dois.
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) return;
+        $('#video').play().catch(() => {});
+        if (naTela.isActive) v.play().catch(() => {});
+      });
+    }, { once: true });
+    v.src = './video/estrada.mp4';
+  }
+
+  // títulos e blocos das seções de baixo
+  document.querySelectorAll('.revela-titulo').forEach((t) => {
+    gsap.to(t.querySelectorAll('.pal'), { yPercent: 0, duration: 1, ease: 'power4.out', stagger: 0.07, scrollTrigger: { trigger: t, start: 'top 86%' } });
+  });
+  if (!semMovimento) {
+    gsap.set('.revela', { opacity: 0, y: 36 });
+    ScrollTrigger.batch('.revela', { start: 'top 90%', onEnter: (els) => gsap.to(els, { opacity: 1, y: 0, duration: 0.9, ease: 'power3.out', stagger: 0.08 }) });
+  }
+  // números que contam (to() a partir de um objeto, não from(): RECEITA §5b)
+  document.querySelectorAll('.conta').forEach((el) => {
+    const fim = +el.dataset.v, dec = +(el.dataset.dec || 0), o = { v: 0 };
+    const escrever = () => { el.textContent = o.v.toFixed(dec).replace('.', ','); };
+    if (semMovimento) return;
+    escrever();
+    gsap.to(o, { v: fim, duration: 1.6, ease: 'power2.out', onUpdate: escrever, scrollTrigger: { trigger: el, start: 'top 90%' } });
+  });
+}
+
+/* ============================================================
+   7. LOOP DE DESENHO
+   ============================================================ */
+const raio = new THREE.Raycaster();
+const mouse = new THREE.Vector2(9, 9);
+let mx = 0, my = 0, sx = 0, sy = 0, quadro = 0, ultimaPeca = '';
+addEventListener('pointermove', (e) => { mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); mx = mouse.x; my = mouse.y; });
+const nomeBonito = (n) => n.replace(/_/g, ' ').replace(/\b([dte])\b/g, (m) => ({ d: 'dianteira', t: 'traseira', e: 'esq.' }[m]));
+const alvo = new THREE.Vector3();
+
+function desenhar() {
+  pivo.rotation.y = estado.giro;
+  aplicarPecas();
+
+  // interpola entre as duas câmeras marcadas vizinhas
+  const i = Math.min(CAMERAS.length - 2, Math.floor(estado.cam));
+  const f = estado.cam - i, A = CAMERAS[i], B = CAMERAS[i + 1];
+  const el = THREE.MathUtils.degToRad(A.el + (B.el - A.el) * f);
+  const recuo = Math.max(1, 1.05 / camera.aspect);                    // celular em pé: a câmera recua
+  const r = (A.raio + (B.raio - A.raio) * f) * recuo * estado.entrada;
+  alvo.set(A.alvo[0] + (B.alvo[0] - A.alvo[0]) * f, alturaCentro + A.alvo[1] + (B.alvo[1] - A.alvo[1]) * f, 0);
+  sx += (mx - sx) * 0.05; sy += (my - sy) * 0.05;                     // paralaxe leve com o mouse
+  camera.position.set(alvo.x + sx * 0.28, alvo.y + Math.sin(el) * r + sy * 0.14, Math.cos(el) * r);
+  camera.lookAt(alvo);
+
+  // enquadramento por recorte: moto à direita no computador, mais alta no celular
+  const w = innerWidth, h = innerHeight;
+  if (w > 1000) camera.setViewOffset(w, h, -w * 0.13, h * 0.06, w, h);
+  else camera.setViewOffset(w, h, 0, h * 0.16, w, h);
+
+  moverMarcas();
+  $('#l-giro').textContent = String(Math.round(THREE.MathUtils.radToDeg(estado.giro + 0.75) % 360)).padStart(3, '0');
+  $('#l-exp').textContent = String(Math.round(estado.explosao * 100)).padStart(3, '0');
+
+  if (comMouse && ++quadro % 6 === 0) {                               // nome da peça sob o mouse
+    raio.setFromCamera(mouse, camera);
+    const toque = raio.intersectObjects(pecas.map((p) => p.malha), false)[0];
+    const nome = toque && scrollY < $('#ficha').offsetTop - innerHeight * 0.5 ? nomeBonito(toque.object.name) : '';
+    if (nome !== ultimaPeca) { ultimaPeca = nome; moverDica(nome); }
+  }
+  renderer.render(scene, camera);
+}
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+/* ============================================================
+   8. LIGANDO TUDO + ENTRADA
+   ============================================================ */
+const modelo = await carregarModelo();
+pivo.add(enquadrar(modelo));
+prepararPecas(pivo);
+criarMarcas();
+$('#qtd').textContent = pecas.length;
+ligarScroll();
+mostrarPasso(0);
+renderer.setAnimationLoop(desenhar);
+window.__estudo = { estado, pecas, camera, scene, CAMERAS, lenis };   // para depurar pelo console
+
+// Entrada: os círculos somem, a cortina abre de baixo para cima, a câmera chega de longe e o título sobe.
+document.documentElement.classList.remove('carregando');
+if (semMovimento) {
+  $('#video').removeAttribute('autoplay'); $('#video').pause();       // sem movimento: fica só a imagem parada
+  estado.entrada = 1; $('#carregando').remove(); mostrarPasso(0);
+} else {
+  $('#video').play().catch(() => {});      // alguns navegadores seguram o autoplay até a página aparecer
+  gsap.set(['#sub', '.abertura .mono', '.topo'], { opacity: 0 });
+  gsap.timeline({ delay: 0.25 })
+    .to('#carregando svg, #carregando .canto, #carregando .pct', { opacity: 0, duration: 0.5 })
+    .to('#carregando', { clipPath: 'inset(0 0 100% 0)', duration: 1.1, ease: 'power4.inOut' }, '-=0.1')
+    .set('#carregando', { display: 'none' })
+    .to(estado, { entrada: 1, duration: 2.2, ease: 'power3.out' }, '-=1.0')
+    .to('#titulo .pal', { yPercent: 0, duration: 1.1, ease: 'power4.out', stagger: 0.08 }, '-=1.9')
+    .to(['.abertura .mono', '#sub', '.topo'], { opacity: 1, duration: 0.9, stagger: 0.12 }, '-=1.2');
+}
+</script>
+</body>
+</html>
